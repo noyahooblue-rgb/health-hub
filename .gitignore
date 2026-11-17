@@ -1,0 +1,22 @@
+# 数据与本地状态：永不进仓库
+app.db
+app.db-*
+*.db
+*.sqlite*
+audits/
+.space-build/
+.space-build-cvm/
+node_modules/
+dist/
+# 配置与凭据
+.env
+.env.*
+*.key
+*.pem
+credentials*
+*secret*
+# 系统
+.DS_Store
+dist*/
+*.tsbuildinfo
+.tsbuildinfo*
