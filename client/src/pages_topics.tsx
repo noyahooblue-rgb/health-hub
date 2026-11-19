@@ -5,36 +5,36 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import {
-  NUTRITION_ITEMS,
-  TOPICS,
-  TOPIC_META,
-  baseline,
-  bedtimeNorm,
-  fmt,
-  fmtDelta,
-  fmtMin,
-  fullSleep,
-  loadRatio,
-  mean,
-  patchDashboard,
-  restoreDashboard,
-  sd,
-  todayStr,
-  weekStats,
-  type Dashboard,
-  type TopicDef,
+NUTRITION_ITEMS,
+TOPICS,
+TOPIC_META,
+baseline,
+bedtimeNorm,
+fmt,
+fmtDelta,
+fmtMin,
+fullSleep,
+loadRatio,
+mean,
+patchDashboard,
+restoreDashboard,
+sd,
+todayStr,
+weekStats,
+type Dashboard,
+type TopicDef,
 } from "./lib";
 import {
-  Card,
-  Chev,
-  EmptyBox,
-  LineChart,
-  MRow,
-  Pill,
-  Sym,
-  TtlHead,
-  useReveal,
-  useToast,
+Card,
+Chev,
+EmptyBox,
+LineChart,
+MRow,
+Pill,
+Sym,
+TtlHead,
+useReveal,
+useToast,
 } from "./ui";
 import { HabitCheckRow } from "./habits";
 import { GoalBox } from "./goals";
@@ -157,7 +157,7 @@ function TopicMetrics({ d, topicKey }: { d: Dashboard; topicKey: string }) {
     case "stress": {
       const recent = d.checkins.slice(-7);
       const avg = (k: "energy" | "mood" | "stress") => mean(recent.map((c) => c[k]));
-      const todayCk = d.checkins.find((c) => c.date === d.latestDate);
+      const todayCk = d.checkins.find((c) => c.date === todayStr());
       return (
         <div>
           <MRow label="今日打卡" value={todayCk ? `精力 ${todayCk.energy} · 情绪 ${todayCk.mood} · 压力 ${todayCk.stress}` : "尚未打卡"} note="在「今日」页完成 10 秒打卡" />
@@ -207,12 +207,13 @@ function TopicMetrics({ d, topicKey }: { d: Dashboard; topicKey: string }) {
 function NutritionChecks({ d }: { d: Dashboard }) {
   const qc = useQueryClient();
   const toast = useToast();
+  // 「今日」以设备本地日期为准，不以 latestDate 为准（同步滞后时轻打卡仍记在今天）。
   const mut = useMutation({
     mutationFn: (v: { item: string; done: boolean }) =>
-      api.toggleNutrition({ date: d.latestDate ?? todayStr(), item: v.item, done: v.done }),
+      api.toggleNutrition({ date: todayStr(), item: v.item, done: v.done }),
     // 勾选即时变，保存异步落盘，失败回滚并弹轻提示（M15）。
     onMutate: (v) => {
-      const key = `${d.latestDate ?? todayStr()}:${v.item}`;
+      const key = `${todayStr()}:${v.item}`;
       const prev = patchDashboard(qc, (old) => ({
         ...old,
         nutrition: v.done
@@ -228,7 +229,7 @@ function NutritionChecks({ d }: { d: Dashboard }) {
       toast.show("饮食打卡没能保存，已恢复到之前的状态，请重试");
     },
   });
-  const date = d.latestDate ?? todayStr();
+  const date = todayStr();
   return (
     <div>
       {NUTRITION_ITEMS.map((it) => {

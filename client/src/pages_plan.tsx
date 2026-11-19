@@ -3,21 +3,26 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { actionFields } from "@hatch/space-sdk/fields" with { type: "macro" };
+import type { Actions } from "../../server/src/actions";
 import { api } from "./api";
 import {
-  TOPICS,
-  bedtimeLongTerm,
-  bedtimeReminder,
-  bedtimeStage,
-  TOPIC_MAP,
-  patchDashboard,
-  restoreDashboard,
-  type Dashboard,
+TOPICS,
+bedtimeLongTerm,
+bedtimeReminder,
+bedtimeStage,
+TOPIC_MAP,
+patchDashboard,
+restoreDashboard,
+type Dashboard,
 } from "./lib";
 import { Card, Seg, TtlHead, useNav, useSheet, useToast } from "./ui";
 import { HabitCheckRow, useHabitMenu } from "./habits";
 import { GoalBox } from "./goals";
 import { TopicsSection } from "./pages_topics";
+
+// 表单输入上限一律取自服务端请求 schema（platformVersion 29）：与服务端校验同源，不手写。
+const FIELDS = actionFields<typeof Actions>();
 
 const WD = ["一", "二", "三", "四", "五", "六", "日"];
 const KINDS = ["力量", "有氧", "轻活动", "灵活", "休息"];
@@ -67,10 +72,10 @@ export function PlanPage({
           bedtime_stage_target: regStage,
         },
       }));
-      setRegMsg("已保存，三个时间全站同步（今日建议、睡眠专题、提醒设置共用同一登记表）。");
+      setRegMsg("已保存，三个时间全站同步（今日建议、睡眠专题、提醒设置都会用新时间）。");
     },
-    // 登记弹层保持打开、输入原样保留：轻提示告知未保存，可直接再点「保存登记」重试。
-    onError: () => toast.show("就寝目标登记没能保存，请再点一次「保存登记」重试"),
+    // 弹层保持打开、输入原样保留：轻提示告知未保存，可直接再点「保存」重试。
+    onError: () => toast.show("就寝目标没能保存，请再点一次「保存」重试"),
   });
   const openRegistry = () => {
     setRegLong(longTerm);
@@ -78,9 +83,9 @@ export function PlanPage({
     setRegMsg("");
     sheet.open(
       <div>
-        <h3>就寝目标登记</h3>
+        <h3>修改就寝目标</h3>
         <p style={{ fontSize: 13.5, color: "var(--dim)", lineHeight: 1.65, margin: 0 }}>
-          长期目标与当前阶段目标都登记在这里；就寝提醒时间 = 阶段目标 − 45 分钟，自动计算，不再单独登记。
+          长期目标与当前阶段目标都在这里改；就寝提醒时间 = 阶段目标 − 45 分钟，自动计算，不用单独设。
         </p>
         <label className="field">
           <span className="fl">长期目标（就寝）</span>
@@ -114,7 +119,7 @@ export function PlanPage({
           disabled={regMut.isPending}
           onClick={() => regMut.mutate()}
         >
-          保存登记
+          保存
         </button>
         {regMsg && <p className="save-msg">{regMsg}</p>}
       </div>,
@@ -131,8 +136,8 @@ export function PlanPage({
             分钟自动算出（{remind}），不用单独设。
           </p>
           <p style={{ margin: "6px 0" }}>
-            <b>在哪里改：</b>只在「计划」页的就寝目标登记卡里改，今日建议、睡眠专题和「我的 ›
-            设置 › 提醒」都读同一张登记表，不会再出现三个地方三个值。
+            <b>在哪里改：</b>只在「计划」页的就寝目标卡里改，今日建议、睡眠专题和「我的 ›
+            设置 › 提醒」都按这里的时间来，不会再出现三个地方三个值。
           </p>
           <p style={{ margin: "6px 0" }}>
             <b>为什么不一步到位：</b>你最近一周入睡时刻波动很大，一次性提前一个多小时很难坚持；先把阶段目标做到连续
@@ -210,6 +215,7 @@ export function PlanPage({
         <label className="field">
           <span className="fl">说明（时间窗、时长，可选）</span>
           <input
+            {...FIELDS.saveWeeklyPlan.days.label}
             type="text"
             className="inp"
             defaultValue={label}
@@ -308,7 +314,7 @@ export function PlanPage({
           )}
 
           <Card>
-            <TtlHead label="就寝目标登记（唯一登记表）" />
+            <TtlHead label="就寝目标" />
             <div className="reg-flow">
               <div className="rf">
                 <div className="k">长期目标</div>
@@ -319,21 +325,21 @@ export function PlanPage({
                 <div className="k">阶段目标</div>
                 <div className="v num">{stage}</div>
               </div>
-              <div className="arr">→</div>
+              <div className="arr-label">提前 45 分钟</div>
               <div className="rf">
                 <div className="k">就寝提醒</div>
                 <div className="v num">{remind}</div>
               </div>
             </div>
             <p className="src-note" style={{ marginTop: 12 }}>
-              提醒 = 阶段目标 − 45 分钟，自动计算；今日建议、睡眠专题、提醒设置都读这张表。
+              就寝提醒在阶段目标前 45 分钟，自动算好；今日建议、睡眠专题和提醒设置都按这里的时间来。
             </p>
             <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
               <button type="button" className="pill-btn" onClick={openHowItWorks}>
                 三层目标是怎么运作的
               </button>
               <button type="button" className="pill-btn dim" onClick={openRegistry}>
-                修改登记
+                修改目标
               </button>
             </div>
           </Card>
@@ -382,6 +388,7 @@ export function PlanPage({
               <label className="field">
                 <span className="fl">目标（具体、可量化、有期限）</span>
                 <input
+                  {...FIELDS.addGoal.title}
                   className="inp"
                   value={gTitle}
                   onChange={(e) => setGTitle(e.target.value)}
@@ -392,6 +399,7 @@ export function PlanPage({
               <label className="field">
                 <span className="fl">说明（可选）</span>
                 <input
+                  {...FIELDS.addGoal.detail}
                   className="inp"
                   value={gDetail}
                   onChange={(e) => setGDetail(e.target.value)}
@@ -518,6 +526,7 @@ export function PlanPage({
               <label className="field">
                 <span className="fl">习惯名称</span>
                 <input
+                  {...FIELDS.addHabit.name}
                   className="inp"
                   value={hName}
                   onChange={(e) => setHName(e.target.value)}
@@ -528,6 +537,7 @@ export function PlanPage({
               <label className="field">
                 <span className="fl">最低版本（状态差时做到什么程度也算完成）</span>
                 <input
+                  {...FIELDS.addHabit.minVersion}
                   className="inp"
                   value={hMin}
                   onChange={(e) => setHMin(e.target.value)}

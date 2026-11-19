@@ -3,36 +3,42 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { actionFields } from "@hatch/space-sdk/fields" with { type: "macro" };
+import type { Actions } from "../../server/src/actions";
 import { api } from "./api";
 import {
-  LIFE_TAGS,
-  asOfLabel,
-  fmt,
-  fmtMin,
-  fullDaily,
-  mean,
-  patchDashboard,
-  recovery,
-  redFlags,
-  restoreDashboard,
-  suggestions,
-  syncStaleness,
-  todayStr,
-  weekLabel,
-  weekStats,
-  type Dashboard,
+LIFE_TAGS,
+asOfLabel,
+dateLabelCn,
+fmt,
+fmtMin,
+fullDaily,
+mean,
+patchDashboard,
+recovery,
+redFlags,
+restoreDashboard,
+suggestions,
+syncStaleness,
+todayStr,
+weekLabel,
+weekStats,
+type Dashboard,
 } from "./lib";
 import {
-  Card,
-  CatTopicBtn,
-  CountUp,
-  EmptyBox,
-  MRow,
-  Pill,
-  TtlHead,
-  useToast,
+Card,
+CatTopicBtn,
+CountUp,
+EmptyBox,
+MRow,
+Pill,
+TtlHead,
+useToast,
 } from "./ui";
 import { HabitCheckRow } from "./habits";
+
+// 表单输入上限一律取自服务端请求 schema（platformVersion 29）：与服务端校验同源，不手写。
+const FIELDS = actionFields<typeof Actions>();
 
 const STAGE_PARTS = [
   { label: "深睡", key: "deepMin", color: "var(--stage-deep)" },
@@ -94,7 +100,20 @@ export function TodayPage({ d }: { d: Dashboard }) {
   // 实际最近同步时间（服务端 saveHealthData 落盘）；尚无记录时回退到晨间时间设置。
   const syncHhmm = d.sync.lastHhmm ?? (d.settings["morning_time"] || "07:30");
 
-  const existing = d.checkins.find((c) => c.date === (latest ?? todayStr()));
+  // 打卡表单日期口径（v1.0.3 + 批复 zjzjfgzz 补项）：
+  // 「今天」以设备本地日期为准，不以数据 latestDate 为准——同步滞后时 latestDate
+  // 还是昨天，但要打的卡是设备今天的。formDate 在表单挂载（打开）时锁定为当时
+  // 的设备日期，之后不再随任何数据变化漂移：
+  //  · 同步滞后（latestDate = 昨天）：表单仍是设备今天的，全空起步，保存写今天；
+  //  · 跨零点不刷新（23:59 打开填一半、00:01 还开着）：formDate 仍是打开那天，
+  //    内容不丢、标题明示所属日期、保存仍写那一天；切走页签再回来（重新挂载）
+  //    才按新的一天初始化。
+  // 表单内容按 formDate 初始化：该日有已保存打卡 → 回填（编辑）；没有 → 全空。
+  // 用户一旦动手改（dirty），数据刷新永不覆盖表单（M12 不变）；未动手时服务端
+  // 数据落地可补填该日已保存记录（如缓存先行渲染时还没拿到）。
+  const deviceToday = todayStr();
+  const [formDate] = useState(() => todayStr());
+  const existing = d.checkins.find((c) => c.date === formDate);
   const [energy, setEnergy] = useState(0);
   const [mood, setMood] = useState(0);
   const [stress, setStress] = useState(0);
@@ -102,21 +121,36 @@ export function TodayPage({ d }: { d: Dashboard }) {
   const [tags, setTags] = useState<string[]>([]);
   const [savedMsg, setSavedMsg] = useState("");
   const [savedWarn, setSavedWarn] = useState(false);
+  const [formFor, setFormFor] = useState<string | null>(null);
+  const dirtyRef = useRef(false);
+  const markDirty = () => {
+    dirtyRef.current = true;
+  };
   useEffect(() => {
+    if (dirtyRef.current) return; // 正在填：刷新不触碰（M12）
     if (existing) {
+      setFormFor(formDate);
       setEnergy(existing.energy);
       setMood(existing.mood);
       setStress(existing.stress);
       setNote(existing.note ?? "");
       setTags(existing.tags);
+    } else if (formFor !== formDate) {
+      setFormFor(formDate);
+      setSavedMsg("");
+      setSavedWarn(false);
+      setEnergy(0);
+      setMood(0);
+      setStress(0);
+      setNote("");
+      setTags([]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existing?.date]);
+  }, [formDate, formFor, existing]);
 
   const checkinMut = useMutation({
     mutationFn: () =>
       api.saveCheckin({
-        date: latest ?? todayStr(),
+        date: formDate,
         energy,
         mood,
         stress,
@@ -124,8 +158,9 @@ export function TodayPage({ d }: { d: Dashboard }) {
         tags,
       }),
     onSuccess: (r) => {
+      dirtyRef.current = false; // 已落盘：表单与保存值一致，后续刷新可正常同步
       // 只把刚保存的打卡并入本地缓存，不再全量重拉整个 dashboard。
-      const date = latest ?? todayStr();
+      const date = formDate;
       patchDashboard(qc, (old) => {
         const entry = {
           date,
@@ -159,10 +194,10 @@ export function TodayPage({ d }: { d: Dashboard }) {
   });
   const suggMut = useMutation({
     mutationFn: (v: { idx: number; done: boolean }) =>
-      api.toggleSuggestion({ date: latest ?? todayStr(), idx: v.idx, done: v.done }),
+      api.toggleSuggestion({ date: deviceToday, idx: v.idx, done: v.done }),
     // 勾选即时变（本地缓存先行），保存异步落盘，失败回滚。
     onMutate: (v) => {
-      const key = `${latest ?? todayStr()}:${v.idx}`;
+      const key = `${deviceToday}:${v.idx}`;
       const prev = patchDashboard(qc, (old) => ({
         ...old,
         suggestionDone: v.done
@@ -239,7 +274,7 @@ export function TodayPage({ d }: { d: Dashboard }) {
         <div className="page-head">
           <h1 className="page-title">今日</h1>
         </div>
-        <EmptyBox text="暂无健康数据。数据由 Atlas 在 07:00–23:00 每小时从 Apple Health 同步回填。" />
+        <EmptyBox text="暂无健康数据。数据由 Atlas 每天同步 4 次（07:00、12:00、18:00、22:00）从 Apple Health 回填，也可以点同步徽标立即刷新。" />
         <button type="button" className="btn" style={{ marginTop: 14 }} onClick={doSync} disabled={syncing}>
           {syncing ? "同步中…" : "立即同步一次"}
         </button>
@@ -260,7 +295,7 @@ export function TodayPage({ d }: { d: Dashboard }) {
   const actHabits = d.habits.filter((h) => h.active);
   const shownHabits = actHabits.slice(0, 3);
   const s0 = sugg[0];
-  const s0Done = s0 ? d.suggestionDone.includes(`${latest}:0`) : false;
+  const s0Done = s0 ? d.suggestionDone.includes(`${deviceToday}:0`) : false;
 
   // 恢复横幅渐变跟随当天重点类别
   let focusGrad =
@@ -575,12 +610,32 @@ export function TodayPage({ d }: { d: Dashboard }) {
         )}
       </Card>
 
-      {/* 每日打卡 */}
-      <Card>
+      {/* 每日打卡：标题明示所属日期（批复 zjzjfgzz 第 3 条）——表单锁定在哪一天，
+          标题就写哪一天；跨零点后仍开着的表单显示「X月X日的打卡」，不会冒充今日。 */}
+      <Card className="checkin-card">
         <TtlHead
           label="每日打卡（10 秒）"
-          right={existing ? <Pill tone="ok">今日已打卡</Pill> : undefined}
+          right={
+            existing ? (
+              <Pill tone="ok">
+                {formDate === deviceToday ? "今日已打卡" : `${dateLabelCn(formDate)}已打卡`}
+              </Pill>
+            ) : undefined
+          }
         />
+        <p
+          className="checkin-date"
+          style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", margin: "2px 0 0" }}
+        >
+          {formDate === deviceToday
+            ? `今日打卡 · ${dateLabelCn(formDate)}`
+            : `${dateLabelCn(formDate)}的打卡`}
+        </p>
+        {formDate !== deviceToday && (
+          <p className="src-note" style={{ marginTop: 4 }}>
+            这份表单是 {dateLabelCn(formDate)} 打开的，填的内容还在，保存仍记在这一天；切到其他页签再回来，会按新的一天重新打开。
+          </p>
+        )}
         <p className="src-note">
           精力 / 情绪 / 压力各 1–5 分，会与 HRV、睡眠一起在「压力与情绪」专题联动展示
         </p>
@@ -603,7 +658,10 @@ export function TodayPage({ d }: { d: Dashboard }) {
                   aria-checked={rateVal[r.key] === n}
                   aria-label={`${r.label} ${n} 分`}
                   className={rateVal[r.key] === n ? "on" : ""}
-                  onClick={() => rateSet[r.key](n)}
+                  onClick={() => {
+                    markDirty();
+                    rateSet[r.key](n);
+                  }}
                 >
                   {n}
                 </button>
@@ -625,15 +683,16 @@ export function TodayPage({ d }: { d: Dashboard }) {
               <button
                 key={t}
                 type="button"
-                className={`chip${on ? " on" : ""}`}
+                className={`chip tog${on ? " on" : ""}`}
                 aria-pressed={on}
-                onClick={() =>
+                onClick={() => {
+                  markDirty();
                   setTags((prev) =>
                     prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
-                  )
-                }
+                  );
+                }}
               >
-                {t}
+                {on ? `✓ ${t}` : t}
               </button>
             );
           })}
@@ -647,29 +706,46 @@ export function TodayPage({ d }: { d: Dashboard }) {
         <label className="field">
           <span className="fl">备注（可选）</span>
           <textarea
+            {...FIELDS.saveCheckin.note}
             className="inp"
             rows={2}
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              markDirty();
+              setNote(e.target.value);
+            }}
             placeholder="例如：今天肩颈有点紧"
             aria-label="打卡备注"
           />
         </label>
-        <button
-          type="button"
-          className="btn"
-          style={{ marginTop: 14 }}
-          disabled={energy === 0 || mood === 0 || stress === 0 || checkinMut.isPending}
-          onClick={() => checkinMut.mutate()}
-        >
-          {checkinMut.isPending ? "保存中…" : existing ? "更新今日打卡" : "保存打卡"}
-        </button>
-        {savedMsg && <p className={`save-msg${savedWarn ? " warn" : ""}`}>{savedMsg}</p>}
+        {/* 保存条：流内排布（不依赖 sticky，批复 t4k7cuj6）——避让由内容底部
+            足量留白 + 本条 scroll-margin-bottom（含 --kb-h）+ 键盘弹起时导航
+            隐藏三层静态机制保证，滚到页面底部或被滚动定位时都完整停在导航
+            上方。样式见 theme.css .checkin-actions。 */}
+        <div className="checkin-actions">
+          <button
+            type="button"
+            className="btn"
+            disabled={energy === 0 || mood === 0 || stress === 0 || checkinMut.isPending}
+            onClick={() => checkinMut.mutate()}
+          >
+            {checkinMut.isPending
+              ? "保存中…"
+              : existing
+                ? formDate === deviceToday
+                  ? "更新今日打卡"
+                  : `更新${dateLabelCn(formDate)}的打卡`
+                : formDate === deviceToday
+                  ? "保存打卡"
+                  : `保存${dateLabelCn(formDate)}的打卡`}
+          </button>
+          {savedMsg && <p className={`save-msg${savedWarn ? " warn" : ""}`}>{savedMsg}</p>}
+        </div>
       </Card>
 
       <div className="sync-zone">
         <p>
-          Atlas 每天 07:00–23:00 每小时自动同步一次（清晨 07:00 那次同时定版昨夜睡眠）；点顶部「{syncHhmm} 已同步」徽标也可立即刷新一次。
+          Atlas 每天同步 4 次（07:00、12:00、18:00、22:00；清晨 07:00 那次同时定版昨夜睡眠）；点顶部「{syncHhmm} 已同步」徽标也可立即刷新一次。
         </p>
       </div>
     </div>

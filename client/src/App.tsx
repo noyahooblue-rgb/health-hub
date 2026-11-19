@@ -2,14 +2,16 @@
 // 导航为 React 单次声明式渲染（幂等，不会叠加第二套）；玻璃只用于悬浮层；
 // 向下滚动自动收窄（下滚累计 ≥40px 且 y>150 触发，上滚/停留/弹层/键盘时展开或隐藏）。
 // 首次打开写入经授权实查的 Apple Health 快照，之后所有页面只读数据库；所有编辑都走服务端动作真实落盘。
+// health-ui v1.0.2 安全网：点页签先 resetTransientUi 无条件复位瞬态状态再切换并自检；
+// 导航层独立层级（见 theme.css 文件头层级总表）；每页签错误边界；kbHidden 看门狗与全局手势复位。
 
 import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+memo,
+useCallback,
+useEffect,
+useMemo,
+useRef,
+useState,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SafeAreaTopScrim } from "@hatch/space-sdk/client";
@@ -17,21 +19,29 @@ import { api } from "./api";
 import { dataProvider } from "./data";
 import type { Dashboard } from "./lib";
 import {
-  GradientDefs,
-  NavContext,
-  NavIcons,
-  SheetProvider,
-  ToastProvider,
-  useSheet,
-  useReducedMotion,
-  type MineView,
-  type TabKey,
+GradientDefs,
+NavContext,
+NavIcons,
+SheetProvider,
+ToastProvider,
+useSheet,
+useReducedMotion,
+type MineView,
+type TabKey,
 } from "./ui";
 import { TodayPage } from "./pages_today";
 import { TrendsPage } from "./pages_trends";
 import { PlanPage } from "./pages_plan";
 import { ReviewPage } from "./pages_review";
 import { MinePage } from "./pages_mine";
+import { TabBoundary } from "./ui";
+import { installGlobalErrorHooks, reportError } from "./errlog";
+
+declare global {
+  interface Window {
+    __appFirstScreenMs?: number;
+  }
+}
 
 const TABS: { key: TabKey; label: string; icon: keyof typeof NavIcons }[] = [
   { key: "today", label: "今日", icon: "today" },
@@ -101,35 +111,56 @@ function scrollTopBoth() {
   if (se && se !== document.documentElement) se.scrollTop = 0;
 }
 
-// ── 页签预热（消除冷启动后第一次切页签的渲染峰值）：首屏渲染完成、浏览器空闲时，
-// 把其余 4 个页签在不可见容器里先渲染一遍（组件代码、图表布局、样式计算全部预热），
-// 用户第一次点过去时只剩真实挂载本身的开销。容器 visibility:hidden + inert + 1px 高裁切：
-// 不可见、不可点、不进无障碍树；图表按容器真实宽度量测，预热结果与真实渲染一致。
-// 预热副本只读同一份 dashboard 数据，不发请求、不写数据（趋势页 onNeedFull 仅由用户点选触发）。
-// 副本经 memo 冻结（比较函数恒真）：挂载后永不重渲染——切页签、数据刷新、乐观更新都不会
-// 带动副本重演，否则预热反而给每次交互加一遍渲染开销。副本数据停在挂载时刻也无妨，
-// 它不可见，唯一作用是把代码与布局缓存焐热。
+// ── 页签预热（v1.0.2 改分级，事故第 7 条）：首屏渲染完成、浏览器空闲时先预热
+// 轻页签（复盘 / 我的：无图表、节点少）；重页签（趋势 / 计划：含全部图表）推迟到
+// 用户首次 pointerdown 之后才挂载——v1.1.0 事故中「进入变慢」的结构性来源正是
+// 首屏后立刻全量渲染趋势页全部图表、占满主线程。容器 visibility:hidden + inert +
+// 1px 高裁切：不可见、不可点、不进无障碍树；图表按容器真实宽度量测。
+// 预热副本只读同一份 dashboard 数据，不发请求、不写数据（趋势页 onNeedFull 仅由
+// 用户点选触发）。副本经 memo 冻结：比较函数只认 heavy 标志——heavy 翻开时重渲染
+// 一次挂上重页签，其余时候（切页签、数据刷新、乐观更新）永不重演，否则预热反而
+// 给每次交互加一遍渲染开销。每个副本页签另包 silent 错误边界，出错不拖垮真页。
 const WarmTabs = memo(
-  function WarmTabs({ d, ensureFull }: { d: Dashboard; ensureFull: () => void }) {
+  function WarmTabs({
+    d,
+    ensureFull,
+    heavy,
+  }: {
+    d: Dashboard;
+    ensureFull: () => void;
+    heavy: boolean;
+  }) {
     const [planSub, setPlanSub] = useState<"goals" | "topics">("goals");
     const [topicSel, setTopicSel] = useState<string | null>(null);
     const [mineView, setMineView] = useState<MineView>("home");
     return (
       <>
-        <TrendsPage d={d} onNeedFull={ensureFull} />
-        <PlanPage
-          d={d}
-          sub={planSub}
-          setSub={setPlanSub}
-          topicSel={topicSel}
-          setTopicSel={setTopicSel}
-        />
-        <ReviewPage d={d} />
-        <MinePage d={d} view={mineView} setView={setMineView} />
+        {heavy && (
+          <>
+            <TabBoundary silent name="warm-trends">
+              <TrendsPage d={d} onNeedFull={ensureFull} />
+            </TabBoundary>
+            <TabBoundary silent name="warm-plan">
+              <PlanPage
+                d={d}
+                sub={planSub}
+                setSub={setPlanSub}
+                topicSel={topicSel}
+                setTopicSel={setTopicSel}
+              />
+            </TabBoundary>
+          </>
+        )}
+        <TabBoundary silent name="warm-review">
+          <ReviewPage d={d} />
+        </TabBoundary>
+        <TabBoundary silent name="warm-mine">
+          <MinePage d={d} view={mineView} setView={setMineView} />
+        </TabBoundary>
       </>
     );
   },
-  () => true,
+  (prev, next) => prev.heavy === next.heavy,
 );
 
 function Shell() {
@@ -219,11 +250,94 @@ function Shell() {
   // 不给正常浏览与切页签添帧开销。
   const [warm, setWarm] = useState(false);
   const [parked, setParked] = useState(false);
+  // 重页签（趋势/计划）预热开关：首次 pointerdown 后才翻开（安全网第 7 条）。
+  const [heavyWarm, setHeavyWarm] = useState(false);
+  useEffect(() => {
+    const onDown = () => setHeavyWarm(true);
+    window.addEventListener("pointerdown", onDown, { once: true });
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, []);
   useEffect(() => {
     if (!warm) return;
     const t = window.setTimeout(() => setParked(true), 1500);
     return () => window.clearTimeout(t);
   }, [warm]);
+  // heavy 翻开时副本要真实布局一遍（图表量测）才焐热：临时解 parked，1.5s 后再停放。
+  useEffect(() => {
+    if (!heavyWarm || !warm) return;
+    setParked(false);
+    const t = window.setTimeout(() => setParked(true), 1500);
+    return () => window.clearTimeout(t);
+  }, [heavyWarm, warm]);
+
+  // 首屏时间钩子（量测用）：Shell 首次渲染 → 数据就绪后首帧绘制完成的毫秒数，
+  // 写入 window.__appFirstScreenMs 供发布量测读取（口径见 DATA-PLAN）。
+  const shellT0 = useRef(performance.now());
+  const firstScreenDone = useRef(false);
+  useEffect(() => {
+    if (!dash.data || firstScreenDone.current) return;
+    firstScreenDone.current = true;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        window.__appFirstScreenMs = Math.max(
+          0,
+          Math.round(performance.now() - shellT0.current),
+        );
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [dash.data]);
+
+  // 全局错误钩子（安全网 F）：window.onerror / unhandledrejection → 错误记录。
+  useEffect(() => {
+    installGlobalErrorHooks();
+  }, []);
+
+  // 安全网 B：全局手势残留复位——任何 pointerup/pointercancel 收尾图表拖动锁；
+  // 窗口失焦 / 切后台再回来清弹层拖动态与图表锁（按松手收尾），不让残留状态跨场景存活。
+  useEffect(() => {
+    const clearLocks = () => {
+      window.__chartScrubbing = false;
+    };
+    const clearAll = () => {
+      window.__chartScrubbing = false;
+      document.body.classList.remove("sheet-dragging");
+      if (!sheetOpenRef.current) document.body.style.removeProperty("--page-scale");
+    };
+    const onVis = () => {
+      if (document.hidden) clearAll();
+      else clearAll();
+    };
+    window.addEventListener("pointerup", clearLocks);
+    window.addEventListener("pointercancel", clearLocks);
+    window.addEventListener("blur", clearAll);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pointerup", clearLocks);
+      window.removeEventListener("pointercancel", clearLocks);
+      window.removeEventListener("blur", clearAll);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // 安全网 B：kbHidden 看门狗——键盘隐藏导航的状态若因 focusout 丢失而卡死，
+  // 1 秒轮询发现焦点已离开输入元素即恢复；焦点仍在输入上但状态持续 5 秒以上
+  // 也硬逃生恢复（真实键盘场景下 5 秒足够完成一次输入焦点转移判定）。
+  useEffect(() => {
+    if (!kbHidden) return;
+    const started = Date.now();
+    const iv = window.setInterval(() => {
+      if (!isTextEntry(document.activeElement) || Date.now() - started > 5000) {
+        setKbHidden(false);
+        document.body.style.removeProperty("--kb-h");
+      }
+    }, 1000);
+    return () => window.clearInterval(iv);
+  }, [kbHidden]);
   useEffect(() => {
     if (!dash.data || warm) return;
     let cancelled = false;
@@ -272,18 +386,62 @@ function Shell() {
   sheetOpenRef.current = sheetOpen;
   navEnabledRef.current = navShrinkEnabled;
 
+  // ── 安全网 A：瞬态 UI 无条件复位 ──
+  // 点页签（及一切编程式导航）先把所有可能卡死的瞬态状态一次清干净，再切换：
+  // 关弹层、清键盘隐藏与 --kb-h、清弹层拖动残留（sheet-dragging / --page-scale）、
+  // 清图表拖动锁、让输入失焦。这样无论此前哪一层状态卡死，点页签永远能切过去。
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const resetTransientUi = useCallback(() => {
+    sheet.close();
+    setKbHidden(false);
+    document.body.style.removeProperty("--kb-h");
+    document.body.classList.remove("sheet-dragging");
+    if (!sheetOpenRef.current) document.body.style.removeProperty("--page-scale");
+    window.__chartScrubbing = false;
+    const ae = document.activeElement as HTMLElement | null;
+    if (ae && isTextEntry(ae)) ae.blur();
+  }, [sheet]);
+
+  // 页签自检（安全网 F）：切换后 300ms 路由仍未变 → 记一条 nav-stuck 错误记录，
+  // 并再复位重切一次（第二次仍失败也不再循环，只留记录待查）。
+  // 每次导航递增序号：自检触发时若已有更新的导航发生，说明用户已主动切走，
+  // 旧检查直接作废——否则快速连点两个页签时，旧自检会把新页签误切回去。
+  const navSeqRef = useRef(0);
+  const selfCheckTab = useCallback(
+    (t: TabKey) => {
+      const seq = ++navSeqRef.current;
+      window.setTimeout(() => {
+        if (navSeqRef.current !== seq) return;
+        if (tabRef.current !== t) {
+          reportError("nav-stuck", `点页签后 300ms 仍未切换到 ${t}`, `stuck-at:${tabRef.current}`);
+          resetTransientUi();
+          setTab(t);
+        }
+      }, 300);
+    },
+    [resetTransientUi],
+  );
+
   const goTab = useCallback(
     (t: TabKey) => {
+      resetTransientUi();
+      // 点页签同时清详情视图：计划回目标分段、专题选择清空、我的回根列表。
+      setPlanSub("goals");
+      setTopicSel(null);
+      setMineView("home");
       setTab(t);
       scrollTopBoth();
       applyShrunk(false);
       downAcc.current = 0;
       guardUntil.current = Date.now() + 700;
+      selfCheckTab(t);
     },
-    [applyShrunk],
+    [applyShrunk, resetTransientUi, selfCheckTab],
   );
   const openTopic = useCallback(
     (key: string) => {
+      resetTransientUi();
       setTab("plan");
       setPlanSub("topics");
       setTopicSel(key);
@@ -291,19 +449,22 @@ function Shell() {
       applyShrunk(false);
       downAcc.current = 0;
       guardUntil.current = Date.now() + 700;
+      selfCheckTab("plan");
     },
-    [applyShrunk],
+    [applyShrunk, resetTransientUi, selfCheckTab],
   );
   const openMine = useCallback(
     (v: MineView) => {
+      resetTransientUi();
       setTab("mine");
       setMineView(v);
       scrollTopBoth();
       applyShrunk(false);
       downAcc.current = 0;
       guardUntil.current = Date.now() + 700;
+      selfCheckTab("mine");
     },
-    [applyShrunk],
+    [applyShrunk, resetTransientUi, selfCheckTab],
   );
   const navApi = useMemo(
     () => ({ goTab, openTopic, openMine }),
@@ -531,24 +692,42 @@ function Shell() {
               </div>
             ) : d ? (
               <div key={tab} className="page">
-                {tab === "today" && <TodayPage d={d} />}
-                {tab === "trends" && <TrendsPage d={d} onNeedFull={ensureFull} />}
-                {tab === "plan" && (
-                  <PlanPage
-                    d={d}
-                    sub={planSub}
-                    setSub={setPlanSub}
-                    topicSel={topicSel}
-                    setTopicSel={setTopicSel}
-                  />
+                {tab === "today" && (
+                  <TabBoundary name="tab-today">
+                    <TodayPage d={d} />
+                  </TabBoundary>
                 )}
-                {tab === "review" && <ReviewPage d={d} />}
-                {tab === "mine" && <MinePage d={d} view={mineView} setView={setMineView} />}
+                {tab === "trends" && (
+                  <TabBoundary name="tab-trends">
+                    <TrendsPage d={d} onNeedFull={ensureFull} />
+                  </TabBoundary>
+                )}
+                {tab === "plan" && (
+                  <TabBoundary name="tab-plan">
+                    <PlanPage
+                      d={d}
+                      sub={planSub}
+                      setSub={setPlanSub}
+                      topicSel={topicSel}
+                      setTopicSel={setTopicSel}
+                    />
+                  </TabBoundary>
+                )}
+                {tab === "review" && (
+                  <TabBoundary name="tab-review">
+                    <ReviewPage d={d} />
+                  </TabBoundary>
+                )}
+                {tab === "mine" && (
+                  <TabBoundary name="tab-mine">
+                    <MinePage d={d} view={mineView} setView={setMineView} />
+                  </TabBoundary>
+                )}
               </div>
             ) : null}
             {d && warm && (
               <div className={`tab-warm${parked ? " parked" : ""}`} aria-hidden="true" inert>
-                <WarmTabs d={d} ensureFull={ensureFull} />
+                <WarmTabs d={d} ensureFull={ensureFull} heavy={heavyWarm} />
               </div>
             )}
           </main>

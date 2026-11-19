@@ -128,7 +128,22 @@ export function todayStr(): string {
   return `${y}-${m}-${dd}`;
 }
 
-/** "2025-03-10 01:47" → 当天分钟数（入睡时刻，跨零点按 +24h 处理由调用方负责）。 */
+/** 「今日」口径（2026-11-18 批复 zjzjfgzz 定案）：一律以设备本地日期为准，
+ *  不以数据 latestDate（最新已同步数据日）为准——同步滞后时 latestDate 是昨天，
+ *  但用户要打的卡、要勾的习惯仍是设备今天的。凡是「今日」的用户状态（打卡
+ *  日期键、习惯/建议/饮食的今日判定、保存写入的日期键）都必须经 todayStr()
+ *  取值；latestDate 只用于数据序列本身的展示与统计锚点。 */
+
+/** "2026-11-18" → "11月18日"（打卡表单标题等处显示所属日期用）。 */
+export function dateLabelCn(date: string): string {
+  const parts = date.split("-");
+  const m = Number(parts[1]);
+  const dd = Number(parts[2]);
+  if (!m || !dd) return date;
+  return `${m}月${dd}日`;
+}
+
+/** "2026-11-14 02:08" → 当天分钟数（入睡时刻，跨零点按 +24h 处理由调用方负责）。 */
 export function clockMinutes(dt: string | null): number | null {
   if (!dt) return null;
   const t = dt.split(" ")[1];
@@ -789,7 +804,7 @@ export function bedtimeReminder(settings: Record<string, string>): string {
   return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
-/** 习惯连续天数：以最新数据日为锚，今天没打卡则从昨天起算。 */
+/** 习惯连续天数：以设备今日为锚（调用方传 todayStr()），今天没打卡则从昨天起算。 */
 export function habitStreak(
   logs: string[],
   habitId: number,

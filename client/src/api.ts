@@ -56,6 +56,25 @@ function createPreviewStub(): typeof realApi {
       if (prop === "listAcceptance") {
         return async () => ({ records: readPreviewAccept() });
       }
+      if (prop === "reportError") {
+        // 预览模式错误记录走 errlog.ts 的本机预览存储，此处仅回成功保持类型完整。
+        return async () => ({ ok: true as const });
+      }
+      if (prop === "getErrorSummary") {
+        return async () => {
+          try {
+            const raw = window.localStorage.getItem("health-errorlog-preview-v1");
+            const rows = raw ? (JSON.parse(raw) as { occurredAt: string }[]) : [];
+            const list = Array.isArray(rows) ? rows : [];
+            return {
+              count: list.length,
+              latestAt: list.length ? (list[list.length - 1]?.occurredAt ?? null) : null,
+            };
+          } catch {
+            return { count: 0, latestAt: null };
+          }
+        };
+      }
       if (prop === "exportData") {
         return async () => ({
           json: JSON.stringify({ preview: true, note: "设计预览模式：示例数据，不含真实健康数据" }, null, 2),

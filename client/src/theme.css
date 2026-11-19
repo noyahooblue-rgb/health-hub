@@ -4,6 +4,29 @@
 /* ═══ 设计系统：与设计提案定版一致（苹果健康式视觉 + Liquid Glass 悬浮层） ═══
  * 设计令牌（颜色/字号/间距/圆角/阴影/弹簧）已按方案 C 拆分到 tokens.css，本文件只保留组件样式，
  * 只引用令牌、不再定义令牌。main.tsx 先加载 tokens.css 再加载本文件。 */
+
+/* ═══ 层级总表（health-ui v1.0.2 安全网 A/C；改层级先改这里再改代码） ═══
+ * 内容（无 z-index，普通流）
+ *   < #topbar 顶部标题栏 z=120（常驻 pointer-events:none，只显示不拦截）
+ *   < .sheet-wrap 弹层 z=300（仅打开时挂载，关闭即卸载）
+ *   < nav.tabs 底部导航 z=2147483646、.toast 轻提示 z=2147483647（导航层，见下）
+ * 导航层独立于页面浮层体系：nav 与 toast 取 int32 近上限 z-index，且应用根
+ * .hatch-space-root 自成一层（z=2147483600）——任何页面内浮层无论给多大的
+ * z-index（应用内元素上限即 int32）都盖不住导航，点页签永远先命中导航本体。
+ * 这是 v1.1.0 事故「残留浮层吞掉页签点击」的结构性修复，G 组故障注入以真实
+ * 坐标点击逐档（z=90/150/250/1000）验证（evidence-v7）。
+ *
+ * ═══ 浮层清单（全站 fixed/absolute 大面积元素，安全网 C） ═══
+ * #topbar（fixed，z120，常驻但 pointer-events:none）；nav.tabs（fixed，导航层，
+ * 交互本体；nav-hidden 时 pointer-events:none 且移出屏幕）；
+ * .sheet-wrap/.sheet-bg/.sheet（fixed，z300，仅打开时挂载）；
+ * .toast（fixed，导航层，pointer-events:none，3.6s 自消）；
+ * .tab-warm 预热副本（absolute，pointer-events:none + visibility:hidden，
+ * parked 后 display:none）；GradientDefs svg（absolute 0×0，aria-hidden）；
+ * .nav-pill/.seg-thumb/.prog .track i/.sym::after/.verdict-card::after
+ * （absolute，均在各自小容器内，pointer-events:none 或纯装饰）。
+ * 结论：非激活浮层一律 pointer-events:none 或不挂载，无全屏常驻拦截层。 */
+.hatch-space-root { position: relative; z-index: 2147483600; }
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -20,7 +43,10 @@ body {
   position: relative;
   max-width: 780px;
   margin: 0 auto;
-  padding: 0 16px calc(94px + env(safe-area-inset-bottom));
+  /* 底部留白 = 导航避让 94px + 安全区 + 键盘高度 --kb-h：键盘弹起时文档尾部
+     等量增高，最后一屏内容（打卡保存条等流内主操作）能滚到键盘上方，
+     不靠任何吸附定位（M25 的页面侧延伸，与 .sheet-body 同一变量口径）。 */
+  padding: 0 16px calc(94px + env(safe-area-inset-bottom) + var(--kb-h, 0px));
   transition: transform 0.45s var(--spring);
   /* M24：弹层打开时背后页面缩放 0.94；拖动弹层时 JS 以内联 --page-scale 连续改写此值（0.94→1）。 */
   transform: scale(var(--page-scale, 1));
@@ -77,19 +103,13 @@ h1, h2, h3 { color: var(--ink); }
   border: 1px solid rgba(var(--glass-base), 0.55);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -0.5px 0 rgba(255, 255, 255, 0.22), 0 14px 34px rgba(31, 38, 135, 0.2), 0 4px 12px rgba(20, 20, 40, 0.08);
 }
-@media (prefers-color-scheme: dark) {
-  .glass {
-    border-color: rgba(255, 255, 255, 0.2);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -0.5px 0 rgba(255, 255, 255, 0.1), 0 14px 34px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.3);
-  }
-}
 @supports not ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
   .glass { background: rgba(var(--glass-base), 0.94); }
 }
 
 /* ── 顶部粘性标题：大标题滚出后只剩居中 17px 小标题 + 滚动边缘渐隐模糊 ── */
 #topbar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 45;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 120;
   padding: calc(8px + env(safe-area-inset-top)) 18px 14px;
   display: flex; align-items: flex-end; justify-content: center;
   pointer-events: none; opacity: 0; transform: translateY(-100%);
@@ -106,7 +126,7 @@ h1, h2, h3 { color: var(--ink); }
 /* ── 悬浮玻璃胶囊页签栏：五页签，滑块上下由 CSS 固定、水平位置读按钮 offset；向下滚动自动收窄 ── */
 nav.tabs {
   position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom));
-  transform: translateX(-50%); z-index: 50;
+  transform: translateX(-50%); z-index: 2147483646; /* 导航层：独立于页面浮层体系，见文件头层级总表 */
   display: flex; gap: 2px; width: min(92vw, 560px); overflow: hidden;
   padding: 5px; border-radius: 999px;
   transition: width 0.5s var(--spring-soft), transform 0.4s var(--spring), opacity 0.3s var(--spring);
@@ -143,6 +163,12 @@ nav.tabs.shrunk button .nl { opacity: 0; max-width: 0; }
 .src-note { font-size: 13px; color: var(--dim); margin-top: 3px; line-height: 1.55; }
 button.chip { border: 0; cursor: pointer; font-family: var(--sans); min-height: 36px; }
 button.chip.on { background: var(--c-sleep); color: #fff; }
+/* 可切换标签（打卡生活标签）：分类色样式（原型 v3 定版，批复 63u2muyg 更正，
+   推翻上一轮的中性灰未选态）——未选 = 白底 + 薄荷描边 + 薄荷文字；选中 = 薄荷
+   实底 + 白字 + 文字前「✓ 」（组件渲染）。不用灰色做未选态，避免与选中态难分
+   （旧淡紫未选态曾让用户误以为标签被预选，v1.0.3）。 */
+button.chip.tog { background: var(--card); color: var(--mint-t); box-shadow: inset 0 0 0 1.5px var(--mint); }
+button.chip.tog.on { background: var(--mint-t); color: #fff; box-shadow: inset 0 0 0 1.5px var(--mint-t); }
 .group-sub { font-size: 13px; font-weight: 700; color: var(--dim); letter-spacing: 0.04em; margin: 20px 4px 0; }
 .sym {
   width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
@@ -163,10 +189,6 @@ button.chip.on { background: var(--c-sleep); color: #fff; }
 .pill.warn { background: var(--amber-soft); color: #9a6200; }
 .pill.danger { background: var(--alert-soft); color: var(--alert); }
 .pill.neutral { background: var(--fill); color: var(--dim); }
-@media (prefers-color-scheme: dark) {
-  .pill.ok { color: #30d158; }
-  .pill.warn { color: #ffb340; }
-}
 
 /* ── verdict：结论横幅 ── */
 .verdict-card { margin-top: 10px; position: relative; overflow: hidden; color: #fff; border-radius: 30px; box-shadow: 0 18px 40px rgba(88, 86, 214, 0.32); padding: 22px 24px; }
@@ -271,13 +293,21 @@ svg .fade-anim { animation: fadeIn 1s ease both; }
 @keyframes streakPop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
 .habit-menu-btn { flex: 0 0 auto; width: 36px; height: 36px; min-height: 36px; border-radius: 50%; border: 0; background: var(--fill); color: var(--dim); font-size: 17px; font-weight: 700; cursor: pointer; line-height: 1; padding: 0; }
 
-/* ── 评分行（每日打卡） ── */
+/* ── 评分行（每日打卡）：1–5 选择器与生活标签同属情绪类分类色（原型 v3 定版）。
+   样式口径更正（2026-11-19，Claude 批复 btqajb62）：旧未选态「薄荷浅底填充」
+   让 15 个圆钮个个带填充色、与选中态仅差填充深浅，真机上被用户读成「所有
+   选项都显示成已点击状态」（分类量测 evidence-v14：打开表单时 aria-checked
+   0/15、保存按钮 disabled，状态为空，属纯显示问题）。新口径与标签语言统一：
+   未选 = 白底（--card）+ 薄荷描边 + 薄荷文字（无任何填充色）；选中 = 薄荷
+   实底 + 白字，并加非颜色线索——内描边加粗（inset 1.5px 与外框叠成双倍环宽）
+   + 轻微放大（scale 1.08）+ 数字加粗，两态不靠颜色深浅也能一眼分辨。
+   未选态不用灰（用户既定规则）；标签样式本轮不动（已验收方向）。 ── */
 .rate-row { padding: 10px 0 4px; }
 .rate-row .rl { display: block; font-size: 15.5px; color: var(--ink); font-weight: 600; margin-bottom: 8px; }
 .rate-row .rs { display: flex; justify-content: space-between; gap: 8px; }
-.rate-row .rs button { width: 48px; height: 48px; min-height: 48px; flex: 0 0 48px; border-radius: 50%; border: 1.5px solid var(--sep); background: var(--card); color: var(--dim); font-family: var(--sans); font-size: 16px; font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums; transition: background 0.25s var(--spring), color 0.25s, border-color 0.25s, transform 0.18s var(--spring); }
+.rate-row .rs button { width: 48px; height: 48px; min-height: 48px; flex: 0 0 48px; border-radius: 50%; border: 1.5px solid var(--mint); background: var(--card); color: var(--mint-t); font-family: var(--sans); font-size: 16px; font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums; transition: background 0.25s var(--spring), color 0.25s, border-color 0.25s, box-shadow 0.25s var(--spring), transform 0.18s var(--spring); }
 @media (max-width: 380px) { .rate-row .rs button { width: 44px; height: 44px; min-height: 44px; flex-basis: 44px; } }
-.rate-row .rs button.on { background: var(--c-sleep); border-color: var(--c-sleep); color: #fff; }
+.rate-row .rs button.on { background: var(--mint-t); border-color: var(--mint-t); color: #fff; box-shadow: inset 0 0 0 1.5px var(--mint-t); transform: scale(1.08); font-weight: 700; }
 .rate-anchors { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--dim); margin-top: 6px; padding: 0 2px; }
 
 /* ── 表单 ── */
@@ -300,6 +330,33 @@ select.inp { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.
 .btn.sm { width: auto; display: inline-block; min-height: 40px; padding: 7px 16px; font-size: 14.5px; border-radius: 11px; }
 .save-msg { font-size: 14px; color: var(--c-sleep); margin-top: 10px; line-height: 1.55; }
 .save-msg.warn { color: var(--alert); }
+
+/* ── 打卡保存条（页内长表单的主操作区）：流内排布 + 底部足量避让（非 sticky）。
+ * 沿革：v1.0.3 首版为普通流内按钮、只靠 .wrap 末尾留白避让，用户真机在自然
+ * 填写位置被悬浮导航压住（2026-11-18 13:51 截图）；evidence-v13 改 sticky
+ * 吸附，但 Claude 批复 t4k7cuj6 指出 Muse webview 中 sticky 不可尽信，要求
+ * 改用不依赖 sticky 的修法。本版回到流内按钮，避让由三层静态机制保证：
+ *  ① 内容底部足量留白：打卡卡之后有 .sync-zone 文案段 + .wrap 末尾
+ *     94px + 安全区留白，合计远大于导航占高（底距 14 + 高 ≈62），滚到页面
+ *     底部时保存按钮完整停在导航上方（I 组 A2 量测）；
+ *  ② scroll-margin-bottom（含键盘高度变量 --kb-h）：任何把保存条滚入视口
+ *     的定位（聚焦自动滚动 / scrollIntoView）都会让它停在「导航 + 键盘」
+ *     之上，而不是贴着视口下缘被盖住（I 组 A1/A6 量测）；
+ *  ③ 键盘弹起时导航按既有规则隐藏（App kbHidden），备注框聚焦自动滚入
+ *     可视区中央，键盘区内没有导航可遮挡；且 .wrap 底部留白含 --kb-h 等量
+ *     增高——文档尾部多出键盘高度的滚动余量，保存条能被滚到键盘上方（纯
+ *     增加文档高度，不用吸附定位；I 组 A5/A6 量测）。
+ * 保存结果/失败文案在条内、随按钮同为流内内容，滚到即见。 */
+.checkin-actions {
+  background: var(--card);
+  border-top: 1px solid var(--sep);
+  padding: 12px 0 2px;
+  margin: 14px 0 0;
+  scroll-margin-bottom: calc(100px + env(safe-area-inset-bottom) + var(--kb-h, 0px));
+}
+/* 备注框被滚动定位（聚焦自动滚动 / scrollIntoView）时，底部让出导航 + 保存条
+ * + 键盘的高度，整框落在可视区内、不被遮住。 */
+.checkin-card textarea.inp { scroll-margin-bottom: calc(200px + var(--kb-h, 0px)); }
 details.more { margin-top: 14px; }
 details.more summary { cursor: pointer; font-size: 14.5px; font-weight: 600; color: var(--c-sleep); min-height: 32px; list-style: none; }
 details.more summary::-webkit-details-marker { display: none; }
@@ -358,7 +415,7 @@ details.more summary::-webkit-details-marker { display: none; }
 .inv-row .f { font-size: 12.5px; color: var(--dim); margin-top: 2px; line-height: 1.55; }
 
 /* ── 底部弹层（sheet） ── */
-.sheet-wrap { position: fixed; inset: 0; z-index: 80; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 300; }
 .sheet-bg { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4); animation: fadeIn 0.25s ease both; }
 .sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 92dvh; overflow-y: auto; background: var(--card); border-radius: 20px 20px 0 0; padding: 0; box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.22); animation: sheetUp 0.45s var(--spring) both; touch-action: pan-y; }
 @keyframes sheetUp { from { transform: translateY(48px); opacity: 0.4; } to { transform: none; opacity: 1; } }
@@ -374,6 +431,8 @@ details.more summary::-webkit-details-marker { display: none; }
 .reg-flow .rf .k { font-size: 12px; color: var(--dim); }
 .reg-flow .rf .v { font-size: 19px; font-weight: 800; color: var(--ink); margin-top: 2px; }
 .reg-flow .arr { align-self: center; color: var(--dim); font-size: 15px; flex: 0 0 auto; }
+/* 第二个连接位不用箭头：提醒与阶段目标是「提前量」关系而非先后流程，改文字标注（v1.0.2 回退修复②） */
+.reg-flow .arr-label { align-self: center; color: var(--dim); font-size: 11.5px; line-height: 1.35; text-align: center; flex: 0 0 auto; max-width: 44px; }
 
 /* ── 周计划 7 天胶囊 ── */
 .daycaps { display: flex; gap: 6px; margin-top: 12px; }
@@ -405,7 +464,6 @@ button.sync-pill.error { background: rgba(255, 59, 48, 0.14); color: #c81e1e; }
 button.sync-pill.stale { background: rgba(255, 159, 10, 0.16); color: #b26a00; }
 button.sync-pill:disabled { opacity: 0.9; }
 .src-note.err { color: var(--alert); }
-@media (prefers-color-scheme: dark) { button.sync-pill { color: #30d158; } button.sync-pill.syncing { color: #ffb340; } button.sync-pill.error { color: #ff6961; } button.sync-pill.stale { color: #ffb340; } }
 
 /* ── M26 数据过期：结论区置灰 + 过期提示条 ── */
 .verdict-card.stale { filter: grayscale(0.9) saturate(0.35); opacity: 0.8; }
@@ -416,7 +474,7 @@ button.sync-pill:disabled { opacity: 0.9; }
 .empty { background: var(--fill); border-radius: 16px; padding: 18px 16px; text-align: center; font-size: 14px; color: var(--dim); line-height: 1.65; margin-top: 10px; }
 
 /* ── 轻提示（Toast）：B 类写操作失败回滚后的可见提示，固定在底部导航上方 ── */
-.toast { position: fixed; left: 50%; bottom: calc(104px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 90; max-width: min(88vw, 430px); background: rgba(28, 28, 30, 0.92); color: #fff; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: center; padding: 11px 18px; border-radius: 99px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); pointer-events: none; animation: toast-in 0.35s var(--spring-soft); }
+.toast { position: fixed; left: 50%; bottom: calc(104px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2147483647; max-width: min(88vw, 430px); background: rgba(28, 28, 30, 0.92); color: #fff; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: center; padding: 11px 18px; border-radius: 99px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); pointer-events: none; animation: toast-in 0.35s var(--spring-soft); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* ── 真机验收页 ── */
@@ -444,9 +502,6 @@ footer.foot-note { margin-top: 40px; font-size: 12.5px; color: var(--dim); line-
 }
 @media (prefers-contrast: more) {
   :root { --dim: #5c5c60; --sep: rgba(60, 60, 67, 0.3); }
-}
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root { --dim: #c9c9cf; --sep: rgba(255, 255, 255, 0.32); }
 }
 @media print {
   nav.tabs, #topbar { display: none; }

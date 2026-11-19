@@ -7,7 +7,7 @@
     "health-bedtime-reminder"
   ],
   "name": "个人健康管理中心",
-  "platformVersion": 28,
+  "platformVersion": 29,
   "runtime": "typescript",
   "slug": "ge-ren-jian-kang-guan-li-zhong-xin"
 }

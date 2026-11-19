@@ -1,22 +1,28 @@
-// 真机验收页（我的 › 关于与免责 › 真机验收）：7 条真机检查项，逐条勾选（勾选 = 通过），
+// 真机验收页（我的 › 关于与免责 › 真机验收）：真机检查项逐条勾选（勾选 = 通过），
+// 条数由 ITEMS 动态决定（v1.0.1 为 7 条，v1.0.2 新增第 8 条「中段切页签」共 8 条）。
 // 底部总备注 + 提交。打开本页期间运行发布规范第 7 节探针（能力探针 + 交互响应日志），
-// 提交时一并带走：7 条勾选、备注、探针统计（条数/中位数/最大值）、能力探针结果、
+// 提交时一并带走：全部勾选、备注、探针统计（条数/中位数/最大值）、能力探针结果、
 // 首屏时间（本页打开到可用）、提交时间、界面版本、当前模式。
 // 正式版：经 submitAcceptance 追加写入 acceptance_records 表（不覆盖历史），
 // Atlas 经 listAcceptance 动作或数据导出读回；预览版：只存本机预览存储，绝不写真实数据。
 
 import { useEffect, useRef, useState } from "react";
+import { actionFields } from "@hatch/space-sdk/fields" with { type: "macro" };
+import type { Actions } from "../../server/src/actions";
 import { api } from "./api";
 import { dataProvider } from "./data";
 import { probeStats } from "./lib";
 import {
-  runCapabilityProbe,
-  startInteractionProbe,
-  type CapabilityMap,
-  type InteractionProbe,
+runCapabilityProbe,
+startInteractionProbe,
+type CapabilityMap,
+type InteractionProbe,
 } from "./probe";
 import { UI_VERSION } from "./version";
 import { Card, TtlHead } from "./ui";
+
+// 表单输入上限一律取自服务端请求 schema（platformVersion 29）：与服务端校验同源，不手写。
+const FIELDS = actionFields<typeof Actions>();
 
 const ITEMS: { codes: string; title: string; how: string; look: string }[] = [
   {
@@ -61,7 +67,15 @@ const ITEMS: { codes: string; title: string; how: string; look: string }[] = [
     how: "打开 iPhone 设置 › 辅助功能 › 动态效果 › 减少动态效果，回到空间再下滑上滑一次。",
     look: "导航收窄和展开变成直接切换、没有弹簧动画，但功能都在。",
   },
+  {
+    codes: "v1.0.2 安全网",
+    title: "在每个页签滑到中间，点其他 4 个页签，都能切过去",
+    how: "逐个页签打开，每个都先向下滑到页面中间停住，再依次点底部导航的其他 4 个页签。",
+    look: "每次点击都立刻切换到所点页签，没有点不动、要点两次或切错的情况；滑到中间时导航收窄成图标条也一样能点。",
+  },
 ];
+
+export const ACCEPT_ITEMS = ITEMS.length;
 
 type AcceptRecord = Awaited<ReturnType<typeof api.listAcceptance>>["records"][number];
 
@@ -145,10 +159,10 @@ export function AcceptanceView() {
     <div>
       <Card>
         <TtlHead
-          label="真机验收（7 条）"
+          label={`真机验收（${ITEMS.length} 条）`}
           right={
             <span style={{ fontSize: 13, color: "var(--dim)" }}>
-              已通过 {passed} / 7
+              已通过 {passed} / {ITEMS.length}
             </span>
           }
         />
@@ -201,10 +215,10 @@ export function AcceptanceView() {
         <label className="field">
           <span className="fl">总备注（可选）</span>
           <textarea
+            {...FIELDS.submitAcceptance.note}
             className="inp"
             rows={3}
             value={note}
-            maxLength={2000}
             onChange={(e) => setNote(e.target.value)}
             placeholder="例如：哪一条没通过、当时是什么表现"
             aria-label="真机验收总备注"
@@ -232,8 +246,8 @@ export function AcceptanceView() {
             </p>
             {[...history].reverse().map((h) => (
               <p key={h.id} style={{ fontSize: 13.5, color: "var(--body)", margin: "3px 0" }}>
-                {fmtTime(h.submittedAt)} · 通过 {h.record.checks.filter(Boolean).length} / 7 ·{" "}
-                {h.record.mode}
+                {fmtTime(h.submittedAt)} · 通过 {h.record.checks.filter(Boolean).length} /{" "}
+                {h.record.checks.length} · {h.record.mode}
               </p>
             ))}
           </div>
