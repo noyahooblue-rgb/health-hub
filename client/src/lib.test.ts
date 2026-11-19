@@ -4,20 +4,22 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  PARTIAL_DATES,
-  asOfLabel,
-  baseline,
-  fullDaily,
-  habitResumePlan,
-  mean,
-  probeStats,
-  sd,
-  segmentAverage,
-  syncStaleness,
-  weekRange,
-  weekStats,
-  type DailyRow,
-  type Dashboard,
+PARTIAL_DATES,
+asOfLabel,
+baseline,
+dateLabelCn,
+fullDaily,
+habitResumePlan,
+habitStreak,
+mean,
+probeStats,
+sd,
+segmentAverage,
+syncStaleness,
+weekRange,
+weekStats,
+type DailyRow,
+type Dashboard,
 } from "./lib";
 
 function mkRow(date: string, steps: number | null, exerciseMin: number | null = null): DailyRow {
@@ -237,5 +239,33 @@ describe("习惯恢复前置判断（habitResumePlan，M17）", () => {
   test("目标已在进行中或不存在 → none", () => {
     expect(habitResumePlan(hs(3, 1), 2).mode).toBe("none");
     expect(habitResumePlan(hs(1, 1), 999).mode).toBe("none");
+  });
+});
+
+describe("日期中文标签（dateLabelCn，打卡标题明示所属日期）", () => {
+  test("YYYY-MM-DD → M月D日（不带零填充）", () => {
+    expect(dateLabelCn("2026-11-18")).toBe("11月18日");
+    expect(dateLabelCn("2026-01-05")).toBe("1月5日");
+  });
+  test("不可解析时原样返回，不编造", () => {
+    expect(dateLabelCn("")).toBe("");
+    expect(dateLabelCn("未知")).toBe("未知");
+  });
+});
+
+describe("习惯连续天数以设备今日为锚（habitStreak）", () => {
+  // 同步滞后场景：日志只到昨天（D-1），锚点是设备今日 D —— 今天未勾，
+  // 连续天数从昨天起算，不因数据未同步而归零或错位。
+  test("今日未勾、昨日起连续 3 天 → 3", () => {
+    const logs = ["1:2026-11-17", "1:2026-11-16", "1:2026-11-15"];
+    expect(habitStreak(logs, 1, "2026-11-18")).toBe(3);
+  });
+  test("今日已勾且连续 → 含今日计数", () => {
+    const logs = ["1:2026-11-18", "1:2026-11-17", "1:2026-11-16"];
+    expect(habitStreak(logs, 1, "2026-11-18")).toBe(3);
+  });
+  test("昨日断档 → 0（今日未勾时不追溯更早）", () => {
+    const logs = ["1:2026-11-15"];
+    expect(habitStreak(logs, 1, "2026-11-18")).toBe(0);
   });
 });

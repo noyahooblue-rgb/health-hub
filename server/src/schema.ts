@@ -153,3 +153,13 @@ export const acceptanceRecords = sqliteTable("acceptance_records", {
   submittedAt: text("submitted_at").notNull(), // ISO 时间（提交时刻）
   payload: text("payload").notNull(), // JSON: 完整提交记录
 });
+
+// 错误记录（health-ui v1.0.2 安全网）：客户端自检与全局错误钩子只追加写入，
+// 服务端只保留最近 200 条。与健康数据集合分开计数，不混入健康数据口径。
+export const errorLogs = sqliteTable("error_logs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  occurredAt: text("occurred_at").notNull(), // ISO 时间（发生时刻）
+  kind: text("kind").notNull(), // window-error | unhandledrejection | boundary | nav-stuck | …
+  message: text("message").notNull(),
+  detail: text("detail"),
+});

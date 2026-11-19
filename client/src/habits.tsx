@@ -4,35 +4,36 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import {
-  addDays,
-  habitResumePlan,
-  habitStreak,
-  patchDashboard,
-  restoreDashboard,
-  todayStr,
-  type Dashboard,
+addDays,
+habitResumePlan,
+habitStreak,
+patchDashboard,
+restoreDashboard,
+todayStr,
+type Dashboard,
 } from "./lib";
 import { useSheet, useToast } from "./ui";
 
 export type Habit = Dashboard["habits"][number];
 
 export function HabitDots({ d, habitId }: { d: Dashboard; habitId: number }) {
-  const latest = d.latestDate;
-  if (!latest) return null;
+  // 点阵以设备今日为锚（近 7 天含今天）：同步滞后时最后一格仍是今天，不缩到昨天。
+  const anchor = todayStr();
   const set = new Set(d.habitLogs);
   return (
     <span className="hdots below" aria-label="近 7 天完成情况">
       {[6, 5, 4, 3, 2, 1, 0].map((i) => (
-        <i key={i} className={set.has(`${habitId}:${addDays(latest, -i)}`) ? "on" : ""} />
+        <i key={i} className={set.has(`${habitId}:${addDays(anchor, -i)}`) ? "on" : ""} />
       ))}
     </span>
   );
 }
 
-export function useHabitToggle(d: Dashboard) {
+export function useHabitToggle() {
   const qc = useQueryClient();
   const toast = useToast();
-  const date = d.latestDate ?? todayStr();
+  // 「今日」以设备本地日期为准，不以 latestDate 为准（同步滞后时勾选仍记在今天）。
+  const date = todayStr();
   return useMutation({
     mutationFn: (v: { id: number; done: boolean }) =>
       api.toggleHabit({ habitId: v.id, date, done: v.done }),
@@ -125,7 +126,7 @@ function HabitMenuContent({ d, hb }: { d: Dashboard; hb: Habit }) {
       setSwapErr("换人没有完成，请检查网络后重试。");
     },
   });
-  const streak = habitStreak(d.habitLogs, hb.id, d.latestDate);
+  const streak = habitStreak(d.habitLogs, hb.id, todayStr());
   const plan = habitResumePlan(d.habits, hb.id);
   const busy = swapMut.isPending || mut.isPending;
   return (
@@ -218,11 +219,11 @@ export function HabitCheckRow({
   showMenu?: boolean;
   topicName?: string;
 }) {
-  const toggle = useHabitToggle(d);
+  const toggle = useHabitToggle();
   const openMenu = useHabitMenu(d);
-  const date = d.latestDate ?? todayStr();
+  const date = todayStr();
   const done = d.habitLogs.includes(`${hb.id}:${date}`);
-  const streak = habitStreak(d.habitLogs, hb.id, d.latestDate);
+  const streak = habitStreak(d.habitLogs, hb.id, todayStr());
   return (
     <div className="check-row">
       <input

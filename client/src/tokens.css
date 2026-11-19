@@ -3,7 +3,8 @@
  * theme.css 与全部组件只引用、不另行定义。设计师资产库的 tokens.css 与本文件保持一致，以本文件为准。
  * 本文件只含变量定义，不含任何组件样式；改动令牌 = 改动全站视觉，须走设计评审。 */
 :root {
-  color-scheme: light dark;
+  /* v1.0.2 起强制浅色：color-scheme 只声明 light，深色令牌块已删除（回退修复④）。 */
+  color-scheme: light;
   /* iOS 系统语义色（HIG · Color） */
   --bg: #f2f2f7;
   --card: #ffffff;
@@ -30,6 +31,14 @@
   --c-spo2: #007aff;
   --c-breath: #32ade6;
   --c-mint: #00c7be;
+  /* 打卡分类色（原型 v3 定版，2026-11-18）：精力/情绪/压力与生活标签同属情绪类，
+     描边用 --mint、文字与选中实底用增强对比度版 --mint-t（白底对比度 ≥4.5:1）。
+     未选态为白底无填充（2026-11-19 批复 btqajb62 更正：旧「薄荷浅底」未选态
+     让所有评分圆钮都带填充色、被读成全部已点击，已废止；--mint-soft 不再用作
+     未选填充，保留令牌备用）。打卡控件不用中性灰底（配色原则：主色新芽绿、颜色代表类别）。 */
+  --mint: #00c8b3;
+  --mint-t: #008575;
+  --mint-soft: rgba(0, 200, 179, 0.12);
   --ok: #34c759;
   --alert: #ff3b30;
   --alert-soft: #ffeceb;
@@ -86,40 +95,4 @@
   --space-muted: var(--dim);
   --space-border: var(--sep);
   --space-accent: var(--accent);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #000000;
-    --card: #1c1c1e;
-    --fill: #2c2c2e;
-    --ink: #ffffff;
-    --body: #e8e8ea;
-    --dim: #98989f;
-    --sep: #38383a;
-    --grid: #2c2c2e;
-    --shadow: none;
-    --shadow-card: none;
-    --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.07);
-    --c-sleep: #7d7aff;
-    --c-activity: #ffa340;
-    --c-energy: #ff8a3d;
-    --c-heart: #ff6482;
-    --c-hrv: #bf5af2;
-    --c-spo2: #409cff;
-    --c-breath: #64d2ff;
-    --c-mint: #63e6e2;
-    --ok: #30d158;
-    --alert: #ff6961;
-    --alert-soft: #3a1512;
-    --amber: #ffb340;
-    --amber-soft: #3a2a10;
-    --seg: #2c2c2e;
-    --seg-on: #636366;
-    --glass-base: 44, 44, 48;
-    --glass-sheen: 0.16;
-    --pill-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.12));
-    --track: #2c2c2e;
-    --bar-mid: #48484a;
-    --warn: #ffb340;
-  }
 }

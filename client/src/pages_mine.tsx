@@ -3,30 +3,36 @@
 // 并入一页；设置即改即存（24 小时制）；导出 JSON/CSV 与清空数据都在「数据与关于」。
 
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { actionFields } from "@hatch/space-sdk/fields" with { type: "macro" };
+import type { Actions } from "../../server/src/actions";
 import { api } from "./api";
-import { UI_VERSION } from "./version";
+import { BUILD_HASH, UI_VERSION } from "./version";
+import { ACCEPT_ITEMS } from "./pages_accept";
 import {
-  GOAL_OPTIONS,
-  LAB_FIELDS,
-  bedtimeLongTerm,
-  bedtimeReminder,
-  bedtimeStage,
-  fmt,
-  patchDashboard,
-  type Dashboard,
+GOAL_OPTIONS,
+LAB_FIELDS,
+bedtimeLongTerm,
+bedtimeReminder,
+bedtimeStage,
+fmt,
+patchDashboard,
+type Dashboard,
 } from "./lib";
 import {
-  Card,
-  Chev,
-  Pill,
-  Switch,
-  Sym,
-  TtlHead,
-  useNav,
-  type MineView,
+Card,
+Chev,
+Pill,
+Switch,
+Sym,
+TtlHead,
+useNav,
+type MineView,
 } from "./ui";
 import { AcceptanceView } from "./pages_accept";
+
+// 表单输入上限一律取自服务端请求 schema（platformVersion 29）：与服务端校验同源，不手写。
+const FIELDS = actionFields<typeof Actions>();
 
 function BackBtn({ onClick, label }: { onClick: () => void; label: string }) {
   return (
@@ -111,24 +117,24 @@ function ProfileForm({ d }: { d: Dashboard }) {
       <div className="form-grid">
         <label className="field">
           <span className="fl">年龄</span>
-          <input className="inp" inputMode="numeric" value={age} onChange={(e) => setAge(e.target.value)} placeholder="例如 32" aria-label="年龄" />
+          <input {...FIELDS.saveProfile.age} className="inp" inputMode="numeric" value={age} onChange={(e) => setAge(e.target.value)} placeholder="例如 32" aria-label="年龄" />
         </label>
         <label className="field">
           <span className="fl">性别</span>
-          <input className="inp" value={sex} onChange={(e) => setSex(e.target.value)} placeholder="男 / 女" aria-label="性别" />
+          <input {...FIELDS.saveProfile.sex} className="inp" value={sex} onChange={(e) => setSex(e.target.value)} placeholder="男 / 女" aria-label="性别" />
         </label>
         <label className="field">
           <span className="fl">身高（cm）</span>
-          <input className="inp" inputMode="decimal" value={height} onChange={(e) => setHeight(e.target.value)} placeholder="例如 175" aria-label="身高" />
+          <input {...FIELDS.saveProfile.heightCm} className="inp" inputMode="decimal" value={height} onChange={(e) => setHeight(e.target.value)} placeholder="例如 175" aria-label="身高" />
         </label>
       </div>
       <label className="field">
         <span className="fl">作息规律（工作日/周末、是否夜班）</span>
-        <textarea className="inp" rows={2} value={work} onChange={(e) => setWork(e.target.value)} placeholder="例如：工作日 9:00–18:00，周末晚起 1 小时" aria-label="作息规律" />
+        <textarea {...FIELDS.saveProfile.workPattern} className="inp" rows={2} value={work} onChange={(e) => setWork(e.target.value)} placeholder="例如：工作日 9:00–18:00，周末晚起 1 小时" aria-label="作息规律" />
       </label>
       <label className="field">
         <span className="fl">当前运动习惯</span>
-        <textarea className="inp" rows={2} value={habit} onChange={(e) => setHabit(e.target.value)} placeholder="例如：每周打羽毛球 1 次，平时走路通勤" aria-label="当前运动习惯" />
+        <textarea {...FIELDS.saveProfile.exerciseHabit} className="inp" rows={2} value={habit} onChange={(e) => setHabit(e.target.value)} placeholder="例如：每周打羽毛球 1 次，平时走路通勤" aria-label="当前运动习惯" />
       </label>
       <div className="field">
         <span className="fl">主要健康目标（最多选 2 个）</span>
@@ -148,7 +154,7 @@ function ProfileForm({ d }: { d: Dashboard }) {
       </div>
       <label className="field">
         <span className="fl">医生叮嘱（原文照录，可选）</span>
-        <textarea className="inp" rows={3} value={doctor} onChange={(e) => setDoctor(e.target.value)} placeholder="体检或就诊时医生特别叮嘱的事项" aria-label="医生叮嘱" />
+        <textarea {...FIELDS.saveProfile.doctorNotes} className="inp" rows={3} value={doctor} onChange={(e) => setDoctor(e.target.value)} placeholder="体检或就诊时医生特别叮嘱的事项" aria-label="医生叮嘱" />
       </label>
       <button type="button" className="btn" style={{ marginTop: 14 }} disabled={mut.isPending} onClick={() => mut.mutate()}>
         {mut.isPending ? "保存中…" : "保存档案"}
@@ -350,7 +356,7 @@ function RemindView({ d }: { d: Dashboard }) {
         <div className="switch-row">
           <div className="sl">
             <div className="t">晨间简报</div>
-            <div className="n">健康数据每天 07:00–23:00 每小时同步一次，晨间打开即是最新</div>
+            <div className="n">健康数据每天同步 4 次（07:00、12:00、18:00、22:00），晨间打开即是最新</div>
           </div>
           <Switch on={morningOn} onChange={(v) => save({ morning_on: v ? "1" : "0" })} label="晨间简报开关" />
         </div>
@@ -394,7 +400,7 @@ function RemindView({ d }: { d: Dashboard }) {
         {msg && <p className={`save-msg${msgWarn ? " warn" : ""}`}>{msg}</p>}
       </Card>
       <Card>
-        <TtlHead label="就寝目标登记（只读）" />
+        <TtlHead label="就寝目标" />
         <div className="reg-flow">
           <div className="rf">
             <div className="k">长期目标</div>
@@ -405,14 +411,14 @@ function RemindView({ d }: { d: Dashboard }) {
             <div className="k">阶段目标</div>
             <div className="v num">{bedtimeStage(d.settings)}</div>
           </div>
-          <div className="arr">→</div>
+          <div className="arr-label">提前 45 分钟</div>
           <div className="rf">
             <div className="k">就寝提醒</div>
             <div className="v num">{bedtimeReminder(d.settings)}</div>
           </div>
         </div>
         <p className="src-note" style={{ marginTop: 10 }}>
-          长期 / 阶段 / 提醒三个时间只在「计划」页登记，这里仅展示，避免多处修改互相覆盖。
+          这三个时间只在「计划」页修改，这里只展示，避免多处修改互相覆盖。
         </p>
       </Card>
     </>
@@ -456,7 +462,7 @@ function DisplayView({ d }: { d: Dashboard }) {
         <Switch on={shrink} onChange={save} label="导航栏自动收窄开关" />
       </div>
       <p className="src-note">
-        深色模式跟随系统设置（iOS 外观），本页不单独提供开关；系统开启「减少动态效果」时导航不收窄。
+        本空间固定浅色外观，不跟随系统深色设置（v1.0.2 起）；系统开启「减少动态效果」时导航不收窄。
       </p>
       {msg && <p className={`save-msg${msgWarn ? " warn" : ""}`}>{msg}</p>}
     </Card>
@@ -466,6 +472,12 @@ function DisplayView({ d }: { d: Dashboard }) {
 /* ── 数据与关于 ── */
 function DataAboutView({ d, onAccept }: { d: Dashboard; onAccept: () => void }) {
   const qc = useQueryClient();
+  // 错误记录每次进入本页现读（staleTime 0），显示总条数与最近一条时间。
+  const errSummary = useQuery({
+    queryKey: ["error-summary"],
+    queryFn: () => api.getErrorSummary({}),
+    staleTime: 0,
+  });
   const [exportMsg, setExportMsg] = useState("");
   const [confirmText, setConfirmText] = useState("");
   const [clearMsg, setClearMsg] = useState("");
@@ -527,26 +539,37 @@ function DataAboutView({ d, onAccept }: { d: Dashboard; onAccept: () => void }) 
         <TtlHead label="关于与免责" />
         <div style={{ fontSize: 14.5, lineHeight: 1.8, marginTop: 6 }}>
           <p style={{ margin: "6px 0" }}>
-            数据来源：Apple Health（经你授权读取），每天 07:00–23:00 每小时同步一次，今日页徽标可点立即刷新。所有结论基于个人基线与公开指南（WHO、AASM、AAO、EFSA 等），参考标准旁均标注来源机构。
+            数据来源：Apple Health（经你授权读取），每天同步 4 次（07:00、12:00、18:00、22:00），也可以点今日页同步徽标立即刷新。所有结论基于个人基线与公开指南（WHO、AASM、AAO、EFSA 等），参考标准旁均标注来源机构。
           </p>
           <p style={{ margin: "6px 0" }}>
             本空间不是医疗工具，不做诊断、不替代医生意见。出现胸痛、晕厥、呼吸困难等情况，请立即就医或拨打当地急救电话。
           </p>
           <p style={{ margin: "6px 0", color: "var(--dim)", fontSize: 13.5 }}>
-            已确认的产品决策：打开弹层时底部导航隐藏（2026-11-17）；不做横滑切页签，误触风险大于收益（2026-11-17）；空间图标为「新芽」（2026-11-17）；采用方案 C（一份 React 代码 + 示例数据预览）（2026-11-17）。
+            已确认的产品决策：打开弹层时底部导航隐藏（2026-11-17）；不做横滑切页签，误触风险大于收益（2026-11-17）；空间图标为「新芽」（2026-11-17）；采用方案 C（一份 React 代码 + 示例数据预览）（2026-11-17）；左缘右滑返回暂缓（与 Muse App 左缘手势冲突风险高、无法完整自动测试，2026-11-18）；本项目代码自 2026-11-18 起存放在 GitHub 仓库 health-hub、只从打标签的提交发布；打卡等按日状态一律按日期键隔离初始值，跨天自动失效、昨日的记录与暂存绝不出现在今天（2026-11-18）；「今日」一律以设备本地日期为准、不以最新数据日为准，同步滞后时打卡、习惯、建议与饮食轻打卡都记在设备今天，打卡表单标题明示所属日期（2026-11-18）；定位重构拍板：页签采用方案 A——今日 / 计划 / 复盘 / 档案 / 我的，「档案」替换「趋势」，页签仍 5 个，本条取代此前「5 页签结构不动」的约定，v2.0 阶段实施（用户对《空间定位重构方案_v1》第 9 节回复「都按推荐」，2026-11-18）；心情记录留在空间的晚间打卡（精力 / 情绪 / 压力 / 标签一次填完），若能读到苹果「心境」当天记录则不再重复问情绪，待第 0 阶段核实（2026-11-18）；体重、血压在苹果健康里记录，空间只读取、不提供录入框（前提是核实能读到，读不到先回报不删）（2026-11-18）；自我实验排进路线图第 4 阶段（v2.3）（2026-11-18）；健康数据同步降频：定时同步由整点改为每天 4 次（07:00 / 12:00 / 18:00 / 22:00），任务计划已于 2026-11-18 生效，观察 2 天后对照 iPhone 读取次数再决定是否收窄数据类型（批复 ks4h7pge，2026-11-18）；配色原则（原型 v3 定版）：颜色代表类别、放在符号 / 标题 / 图表上，数字保持黑色，主色只有一个（新芽绿），不搞中性灰控件底色（2026-11-18）。
           </p>
           <p style={{ margin: "6px 0", color: "var(--dim)", fontSize: 13.5 }}>
-            界面版本：{UI_VERSION}（预览版与正式版同版本号）
+            界面版本：{UI_VERSION}（预览版与正式版同版本号） · 构建哈希：{BUILD_HASH}
+          </p>
+          <p style={{ margin: "6px 0", color: "var(--dim)", fontSize: 13.5 }}>
+            {errSummary.data
+              ? errSummary.data.count > 0
+                ? `错误记录：共 ${errSummary.data.count} 条 · 最近一条 ${
+                    errSummary.data.latestAt
+                      ? new Date(errSummary.data.latestAt).toLocaleString("zh-CN", { hour12: false })
+                      : "—"
+                  }（异常会自动记下，供排查时读回）`
+                : "错误记录：共 0 条（异常会自动记下，供排查时读回）"
+              : "错误记录：读取中…"}
           </p>
         </div>
       </Card>
       <Card>
         <TtlHead label="发布验收" />
         <p className="src-note">
-          每次发布后在真机上逐条核对动效与交互（7 条），结果单独保存、不混入健康数据。
+          每次发布后在真机上逐条核对动效与交互（{ACCEPT_ITEMS} 条），结果单独保存、不混入健康数据。
         </p>
         <div className="set-group" style={{ marginTop: 10 }}>
-          <Row icon="check" label="真机验收" value="7 条" onClick={onAccept} />
+          <Row icon="check" label="真机验收" value={`${ACCEPT_ITEMS} 条`} onClick={onAccept} />
         </div>
       </Card>
       <Card className="flag-card">
@@ -674,7 +697,7 @@ export function MinePage({ d, view, setView }: { d: Dashboard; view: MineView; s
 
       <div className="group-label">设置</div>
       <div className="set-group">
-        <Row icon="bell" label="提醒与同步" value="每小时同步" onClick={() => setView("remind")} />
+        <Row icon="bell" label="提醒与同步" value="每天 4 次" onClick={() => setView("remind")} />
         <Row icon="eye" label="外观与导航" value={d.settings["nav_shrink"] === "0" ? "不收窄" : "自动收窄"} onClick={() => setView("display")} />
         <Row icon="target" label="目标登记" value={`阶段 ${bedtimeStage(d.settings)}`} onClick={() => nav.goTab("plan")} />
       </div>

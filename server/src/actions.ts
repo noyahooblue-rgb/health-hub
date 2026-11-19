@@ -17,10 +17,12 @@ SEED_WORKOUTS,
 
 const okResponse = z.object({ ok: z.literal(true) });
 
-// 真机验收提交记录的结构（验收页与读回共用）：7 条勾选、总备注、探针统计
-// （记录条数/中位数/最大值）、能力探针结果、首屏时间、提交时间、界面版本、模式。
+// 真机验收提交记录的结构（验收页与读回共用）：勾选（条数随版本增减：
+// v1.0.1 为 7 条、v1.0.2 为 8 条，读回须兼容历史记录，故 min(7).max(12)）、
+// 总备注、探针统计（记录条数/中位数/最大值）、能力探针结果、首屏时间、
+// 提交时间、界面版本、模式。
 const acceptanceRecordSchema = z.object({
-  checks: z.array(z.boolean()).length(7),
+  checks: z.array(z.boolean()).min(7).max(12),
   note: z.string().max(4000),
   probe: z.object({
     count: z.number().int().min(0),
@@ -1017,7 +1019,7 @@ export const Actions = {
 
   saveHealthData: defineAction({
     description:
-      "回填 Apple Health 新数据：按日期 upsert 每日指标、睡眠夜与训练记录（供每小时/手动同步任务调用）；每次调用同时把最近同步时间与状态记入 meta，供今日页徽标显示实际同步时间。",
+      "回填 Apple Health 新数据：按日期 upsert 每日指标、睡眠夜与训练记录（供每天 4 次定时/手动同步任务调用）；每次调用同时把最近同步时间与状态记入 meta，供今日页徽标显示实际同步时间。",
     request: z.object({
       daily: z.array(dailyRow.omit({ date: true }).extend({ date: z.string() })),
       sleep: z.array(sleepRow),
@@ -1087,7 +1089,7 @@ export const Actions = {
 
   refreshHealthData: defineAction({
     description:
-      "发起一次健康数据同步（每小时定时或今日页徽标手动触发）：后台任务经 health-cli 读取已同步到 Muse 的 Apple Health 最新数据并回填本空间。同步进行中重复触发不重复启动；定时触发仅在 07:00–23:00（Asia/Shanghai）内执行。",
+      "发起一次健康数据同步（每天 4 次定时或今日页徽标手动触发）：后台任务经 health-cli 读取已同步到 Muse 的 Apple Health 最新数据并回填本空间。同步进行中重复触发不重复启动；定时触发仅在 07:00–23:00（Asia/Shanghai）内执行。",
     request: z.object({ scheduled: z.boolean().optional() }),
     response: z.object({
       started: z.boolean(),
@@ -1116,7 +1118,7 @@ export const Actions = {
             started: false,
             status: state.status,
             lastHhmm: state.lastHhmm,
-            message: "当前不在每小时同步时段（07:00–23:00），本次跳过。",
+            message: "当前不在定时同步时段（07:00–23:00），本次跳过。",
           };
         }
       }
@@ -1142,7 +1144,7 @@ export const Actions = {
       ]);
       const result = await ctx.agent.spawnTask(
         [
-          "任务：为「个人健康管理中心」空间同步 Apple Health 新数据（每小时定时刷新或用户手动触发，逻辑相同）。",
+          "任务：为「个人健康管理中心」空间同步 Apple Health 新数据（每天 4 次定时刷新或用户手动触发，逻辑相同）。",
           `本地数据库里最新一条每日指标日期是 ${last}。请用 health-cli（--provider healthkit）读取该日期之后（含当日）到今天的全部数据：`,
           "1) query metrics --interval daily，字段：step_count, active_energy_burned_kcal, apple_exercise_time_sum, apple_stand_time_sum, resting_hr_average_bpm, heart_rate_variability_ms, oxygen_saturation_average（返回为小数，转成百分数）, respiratory_rate_average, apple_sleeping_wrist_temperature_average, walking_heart_rate_average_average, distance_walking_running_meters, dietary_water_sum, headphone_audio_exposure_average。",
           "2) query sessions --category sleep：按起床日归属，totalMin = core+deep+REM+unspecified 分钟数，另带各分期、efficiency、quality_score、awakenings、起止时间。清晨的同步会把昨夜睡眠定版，白天同步时睡眠一般无变化，照常回填即可。",
@@ -1173,9 +1175,59 @@ export const Actions = {
     },
   }),
 
+  reportError: defineAction({
+    description:
+      "追加一条客户端错误记录到 error_logs 表（全局错误钩子/错误边界/页签自检上报），服务端只保留最近 200 条。",
+    request: z.object({
+      occurredAt: z.string().min(1),
+      kind: z.string().min(1).max(64),
+      message: z.string().min(1).max(2000),
+      detail: z.string().max(4000).optional(),
+    }),
+    response: okResponse,
+    async handler(ctx, args): Promise<z.infer<typeof okResponse>> {
+      const db = ctx.db<typeof schema>();
+      await db.insert(schema.errorLogs).values({
+        occurredAt: args.occurredAt,
+        kind: args.kind,
+        message: args.message,
+        detail: args.detail ?? null,
+      });
+      // 只保留最近 200 条：删掉 id 小于（最大 id − 199）的行。
+      await db.run(
+        sql`DELETE FROM error_logs WHERE id <= (SELECT MAX(id) FROM error_logs) - 200`,
+      );
+      return { ok: true as const };
+    },
+  }),
+
+  getErrorSummary: defineAction({
+    description: "只读：返回错误记录总条数与最近一条的发生时间（error_logs 表），供「关于与免责」页展示。",
+    request: z.object({}),
+    response: z.object({
+      count: z.number(),
+      latestAt: z.string().nullable(),
+    }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select({ occurredAt: schema.errorLogs.occurredAt })
+        .from(schema.errorLogs)
+        .orderBy(desc(schema.errorLogs.id))
+        .limit(1);
+      const cnt = await db
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(schema.errorLogs);
+      return {
+        count: cnt[0]?.n ?? 0,
+        latestAt: rows[0]?.occurredAt ?? null,
+      };
+    },
+  }),
+
   submitAcceptance: defineAction({
     description:
-      "提交一次真机验收结果（7 条勾选、备注、探针统计、能力探针、首屏时间、界面版本、模式），追加保存到 acceptance_records 表，不覆盖历史提交。",
+      "提交一次真机验收结果（勾选条数随界面版本：v1.0.2 为 8 条；含备注、探针统计、能力探针、首屏时间、界面版本、模式），追加保存到 acceptance_records 表，不覆盖历史提交。",
     request: acceptanceRecordSchema,
     response: submitAcceptanceResponse,
     async handler(ctx, args): Promise<z.infer<typeof submitAcceptanceResponse>> {
@@ -1233,6 +1285,7 @@ export const Actions = {
         nutritionChecks: await db.select().from(schema.nutritionChecks),
         reports: await db.select().from(schema.reports),
         acceptanceRecords: await db.select().from(schema.acceptanceRecords),
+        errorLogs: await db.select().from(schema.errorLogs),
       };
       return {
         json: JSON.stringify(data, null, 2),
@@ -1263,6 +1316,7 @@ export const Actions = {
         schema.nutritionChecks,
         schema.reports,
         schema.acceptanceRecords,
+        schema.errorLogs,
         schema.meta,
       ];
       const stmts: BatchItem<"sqlite">[] = tables.map((t) => db.delete(t));

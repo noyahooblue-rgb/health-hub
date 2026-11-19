@@ -2,19 +2,21 @@
 // 1:1 像素渲染的拖动查数走势图（基线带 + 读数在标题区）、周柱状图、计数动画。
 
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type PointerEvent as RPointerEvent,
-  type ReactNode,
+Component,
+createContext,
+useCallback,
+useContext,
+useEffect,
+useLayoutEffect,
+useRef,
+useState,
+type CSSProperties,
+type PointerEvent as RPointerEvent,
+type ReactNode,
 } from "react";
 import { fmt, segmentAverage, type Baseline } from "./lib";
 import { easeOutCubic, projectVelocity, rubberBand } from "./motion";
+import { reportError } from "./errlog";
 
 export type TabKey = "today" | "trends" | "plan" | "review" | "mine";
 export type MineView =
@@ -35,18 +37,9 @@ export const useNav = () => useContext(NavContext);
 // ---------- 基础 ----------
 
 export function useDark(): boolean {
-  const [dark, setDark] = useState<boolean>(
-    () =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const fn = (e: MediaQueryListEvent) => setDark(e.matches);
-    mq.addEventListener("change", fn);
-    return () => mq.removeEventListener("change", fn);
-  }, []);
-  return dark;
+  // v1.0.2 起强制浅色（深色外观曾在事故截图中被误认为故障来源，先关掉）：
+  // 恒返回 false，图表等按浅色令牌取色；令牌层亦已删除深色块。
+  return false;
 }
 
 export function useReducedMotion(): boolean {
@@ -118,6 +111,57 @@ export function Card({
       {children}
     </section>
   );
+}
+
+// ---------- 错误边界（v1.0.2 安全网 E） ----------
+// 单页签渲染抛错时只兜住该页签：显示可重试的兜底文案并记一条 boundary 错误；
+// 导航与顶栏在边界之外，永远可点。silent 版用于预热副本：出错只记日志、渲染为空。
+interface BoundaryState {
+  failed: boolean;
+  nonce: number;
+}
+export class TabBoundary extends Component<
+  { children: ReactNode; silent?: boolean; name: string },
+  BoundaryState
+> {
+  override state: BoundaryState = { failed: false, nonce: 0 };
+
+  static getDerivedStateFromError(): Partial<BoundaryState> {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: unknown) {
+    reportError(
+      "boundary",
+      error instanceof Error ? error.message : String(error),
+      this.props.name,
+    );
+  }
+
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    if (this.props.silent) return null;
+    return (
+      <div style={{ padding: "64px 0", textAlign: "center" }} key={this.state.nonce}>
+        <p style={{ fontSize: 17, fontWeight: 700, color: "var(--ink)" }}>
+          这部分暂时无法显示
+        </p>
+        <p style={{ fontSize: 14, color: "var(--dim)", marginTop: 8 }}>
+          其他页签不受影响，可以先切过去看看。
+        </p>
+        <button
+          type="button"
+          className="btn sm"
+          style={{ marginTop: 16 }}
+          onClick={() =>
+            this.setState((s) => ({ failed: false, nonce: s.nonce + 1 }))
+          }
+        >
+          重试
+        </button>
+      </div>
+    );
+  }
 }
 
 export function Chev() {
@@ -455,7 +499,7 @@ export function CountUp({
       setDisplay(value);
       return;
     }
-    // 首次挂载从 0 滚入；之后每次数值变化（每小时刷新/手动同步回填）都从当前显示值补间到新值，
+    // 首次挂载从 0 滚入；之后每次数值变化（定时刷新/手动同步回填）都从当前显示值补间到新值，
     // 只动数字、不重置任何界面状态（方案 C 第 6 条）。缓动统一走 motion 模块。
     const isFirst = first.current;
     const from = isFirst ? 0 : displayRef.current;
@@ -802,6 +846,7 @@ export function SheetProvider({ children }: { children: ReactNode }) {
               onPointerMove={onDragMove}
               onPointerUp={onDragEnd}
               onPointerCancel={onDragEnd}
+              onLostPointerCapture={onDragEnd}
             >
               <div className="grab" role="presentation" />
               <button
@@ -960,10 +1005,18 @@ export function LineChart(props: LineChartProps) {
     return best;
   };
 
+  // 拖动锁不活动兜底（v1.0.2 安全网 B）：begin/每次 move 都续期 1 秒定时器，
+  // 1 秒无活动（pointerup 丢失、组件异常等）自动按松手收尾，锁永不长挂。
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armIdle = () => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => finish(), 1000);
+  };
   const begin = (e: RPointerEvent<SVGSVGElement>) => {
     const s = scrub.current;
     if (s) s.active = true;
     (window as unknown as { __chartScrubbing?: boolean }).__chartScrubbing = true;
+    armIdle();
     try {
       (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
     } catch {
@@ -972,6 +1025,10 @@ export function LineChart(props: LineChartProps) {
     setSel(nearest(e.clientX, e.currentTarget));
   };
   const finish = () => {
+    if (idleTimer.current) {
+      clearTimeout(idleTimer.current);
+      idleTimer.current = null;
+    }
     const s = scrub.current;
     if (s?.timer) clearTimeout(s.timer);
     if (s?.active) setSel(-1);
@@ -1043,10 +1100,14 @@ export function LineChart(props: LineChartProps) {
             }
             return;
           }
+          armIdle();
           setSel(nearest(e.clientX, e.currentTarget));
         }}
         onPointerUp={finish}
         onPointerCancel={finish}
+        onLostPointerCapture={() => {
+          if (scrub.current?.active) finish();
+        }}
         onKeyDown={(e) => {
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();

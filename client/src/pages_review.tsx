@@ -1,7 +1,7 @@
 // 复盘页（设计版）：周报 / 月报 / 季度回顾三段；本周速览按自然周计算（与今日、趋势同口径），
 // 报告全文可展开（原文），不改写报告内容。
 
-import { useState} from "react";
+import { useState } from "react";
 import {
 fmt,
 fmtMin,
@@ -13,7 +13,7 @@ weekLabel,
 weekStats,
 type Dashboard,
 } from "./lib";
-import { Card, EmptyBox, Seg, TtlHead, useNav} from "./ui";
+import { Card, EmptyBox, Seg, TtlHead, useNav } from "./ui";
 
 function ReportBody({ body}: { body: string}) {
 const paras = body
